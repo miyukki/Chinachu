@@ -249,10 +249,19 @@ P = Class.create(P, {
 			],
 			onSelect  : this.updateToolbar.bind(this),
 			onDeselect: this.updateToolbar.bind(this),
+			onRendered: function(e) {
+				if (this.grid.rows.length == 0) return;
+				var page = this.grid.pagePosition + 1;
+				window.location.hash = this.app.pm._lastHash = '!/rules/list/page=' + page + '/';
+			}.bind(this),
 			onDblClick: function(e, row) {
 				new chinachu.ui.EditRule(global.chinachu.rules.indexOf(row.data));
 			}.bind(this)
 		}).insertTo(this.view.content);
+		
+		if (this.self.query.page) {
+			this.grid.pagePosition = parseInt(this.self.query.page) - 1;
+		}
 		
 		this.drawMain();
 		

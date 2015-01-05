@@ -92,11 +92,20 @@ P = Class.create(P, {
 					align: 'center',
 				}
 			],
+			onRendered: function(e) {
+				if (this.grid.rows.length == 0) return;
+				var page = this.grid.pagePosition + 1;
+				window.location.hash = this.app.pm._lastHash = '!/reserves/list/page=' + page + '/';
+			}.bind(this),
 			onClick: function(e, row) {
 				window.location.href = '#!/program/view/id=' + row.data.id + '/';
 			}.bind(this)
 		}).insertTo(this.view.content);
 		
+		if (this.self.query.page) {
+			this.grid.pagePosition = parseInt(this.self.query.page) - 1;
+		}
+
 		this.drawMain();
 		
 		return this;

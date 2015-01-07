@@ -2,7 +2,7 @@
  *  Chinachu Task Scheduler (chinachu-scheduler)
  *
  *  Copyright (c) 2012 Yuki KAN and Chinachu Project Contributors
- *  http://chinachu.akkar.in/
+ *  https://chinachu.moe/
 **/
 /*jslint node:true, nomen:true, plusplus:true, regexp:true, vars:true, continue:true */
 /*global gc */
@@ -165,6 +165,19 @@ function scheduler() {
 	
 	util.log('RUNNING SCHEDULER.');
 	
+	// IDが重複しているかチェックするだけ
+	var idMap = {};
+	schedule.forEach(function (ch) {
+		ch.programs.forEach(function (p) {
+			if (idMap[p.id]) {
+				util.log('**WARNING**: ' + p.id + ' is duplicated!');
+				util.puts(JSON.stringify(idMap[p.id], null, '  '), JSON.stringify(p, null, '  '));
+			} else {
+				idMap[p.id] = p;
+			}
+		});
+	});
+	
 	reserves = JSON.parse(fs.readFileSync(RESERVES_DATA_FILE, { encoding: 'utf8' }) || '[]');//読み込む
 	
 	var typeNum = {};
@@ -194,7 +207,11 @@ function scheduler() {
 	
 	reserves.forEach(function (reserve) {
 		if (reserve.isManualReserved) {
-			matches.push(reserve);
+			if (reserve.start + 86400000 > Date.now()) {
+				reserve = chinachu.getProgramById(reserve.id, schedule) || reserve;
+				reserve.isManualReserved = true;
+				matches.push(reserve);
+			}
 			return;
 		}
 		var i, l;
@@ -334,10 +351,11 @@ function convertPrograms(p, ch) {
 		var title = c.title[0]._
 			.replace(/【.{1,2}】/g, '')
 			.replace(/\[.\]/g, '')
+			.replace(/アニメ「([^「」]+)」/g, '$1')
 			.replace(/([^場版])「.+」/g, '$1')
 			.replace(/(#|＃|♯)[0-9０１２３４５６７８９]+/g, '')
 			.replace(/第([0-9]+|[０１２３４５６７８９零一壱二弐三参四五伍六七八九十拾]+)話/g, '')
-			.replace(/([0-9]+|[０１２３４５６７８９]+)品目/g, '')
+			.replace(/([0-9]+|[０１２３４５６７８９]+)憑目/g, '')
 			.trim();
 		
 		var desc = c.desc[0]._ || '';
@@ -352,7 +370,11 @@ function convertPrograms(p, ch) {
 		}
 		
 		var flags = [];
-		var matchedFlags = (c.title[0]._.match(/【(.)】/g) || []).concat(c.title[0]._.match(/\[(.)\]/g) || []);
+		var flagsSource = c.title[0]._
+			.replace(/【/g, '[')
+			.replace(/】/g, ']')
+			.replace(/\[無料\]/g, '[無]');
+		var matchedFlags = (flagsSource.match(/\[(.)\]/g) || []);
 		for (j = 0, m = matchedFlags.length; j < m; j++) {
 			flags.push(matchedFlags[j].match(/(?:【|\[)(.)(?:】|\])/)[1]);
 		}
@@ -361,31 +383,25 @@ function convertPrograms(p, ch) {
 		if (flags.indexOf('新') !== -1) {
 			episodeNumber = 1;
 		} else {
-			var episodeNumberMatch = (c.title[0]._ + desc).match(/((#|＃|♯)[0-9０１２３４５６７８９]+|第([0-9]+|[０１２３４５６７８９零一二三四五六七八九十]+)話)|([0-9]+|[０１２３４５６７８９]+)品目|Episode ?[IⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫVX]+/);
+			var episodeNumberMatch = (c.title[0]._ + ' ' + desc).match(/(#|＃|♯)[0-9０１２３４５６７８９]+|第([0-9]+|[０１２３４５６７８９零一二三四五六七八九十]+)(憑目|話)|Episode ?[IⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫVX]+/);
 			if (episodeNumberMatch !== null) {
 				var episodeNumberString = episodeNumberMatch[0];
 				
 				episodeNumberString = episodeNumberString
-					.replace('#', '')
-					.replace('＃', '')
-					.replace('♯', '')
-					.replace('第', '')
-					.replace('話', '')
-					.replace('喪', '')
-					.replace('品目', '')
-					.replace('Ｅｐｉｓｏｄｅ', '')
-					.replace('Episode', '')
-					.replace(/０/g, '0')
-					.replace(/１/g, '1')
-					.replace(/２/g, '2')
-					.replace(/３/g, '3')
-					.replace(/４/g, '4')
-					.replace(/５/g, '5')
-					.replace(/６/g, '6')
-					.replace(/７/g, '7')
-					.replace(/８/g, '8')
-					.replace(/９/g, '9')
-					.replace(/零/g, '0')
+					.replace(/#|＃|♯|第|話|憑目/g, '')
+					.replace(/０|零/g, '0')
+					.replace(/４|Ⅳ|IV|ＩＶ/g, '4')
+					.replace(/８|Ⅷ|VIII|ＶＩＩＩ/g, '8')
+					.replace(/７|Ⅶ|VII|ＶＩＩ/g, '7')
+					.replace(/６|Ⅵ|VI|ＶＩ/g, '6')
+					.replace(/５|Ⅴ/g, '5')
+					.replace(/９|Ⅸ|IX|ＩＸ/g, '9')
+					.replace(/Ⅻ|XII|ＸＩＩ/g, '12')
+					.replace(/Ⅺ|XI|ＸＩ/g, '11')
+					.replace(/３|Ⅲ|III|ＩＩＩ/g, '3')
+					.replace(/２|Ⅱ|II|ＩＩ/g, '2')
+					.replace(/１|Ⅰ|I|Ｉ/g, '1')
+					.replace(/Ⅹ|X|Ｘ/g, '10')
 					.replace(/二十一/g, '21')
 					.replace(/二十二/g, '22')
 					.replace(/二十三/g, '23')
@@ -410,18 +426,6 @@ function convertPrograms(p, ch) {
 					.replace(/七/g, '7')
 					.replace(/八/g, '8')
 					.replace(/九/g, '9')
-					.replace(/Ⅳ|IV|ＩＶ/g, '4')
-					.replace(/Ⅷ|VIII|ＶＩＩＩ/g, '8')
-					.replace(/Ⅶ|VII|ＶＩＩ/g, '7')
-					.replace(/Ⅵ|VI|ＶＩ/g, '6')
-					.replace(/Ⅴ/g, '5')
-					.replace(/Ⅸ|IX|ＩＸ/g, '9')
-					.replace(/Ⅻ|XII|ＸＩＩ/g, '12')
-					.replace(/Ⅺ|XI|ＸＩ/g, '11')
-					.replace(/Ⅲ|III|ＩＩＩ/g, '3')
-					.replace(/Ⅱ|II|ＩＩ/g, '2')
-					.replace(/Ⅰ|I|Ｉ/g, '1')
-					.replace(/Ⅹ|X|Ｘ/g, '10')
 					.trim();
 				
 				episodeNumber = parseInt(episodeNumberString, 10);
@@ -434,8 +438,14 @@ function convertPrograms(p, ch) {
 		var startTime = startDate.getTime();
 		var endTime   = endDate.getTime();
 		
+		// 番組ID (v1.3)
+		var programId = '';
+		programId += ch.id.toLowerCase().replace('_', '');
+		programId += '-';
+		programId += parseInt(c.$.event_id, 10).toString(36);
+		
 		var programData = {
-			id        : ch.id.toLowerCase().replace('_', '') + '-' + parseInt(c.$.event_id, 10).toString(32),
+			id        : programId,
 			channel   : ch,
 			category  : c.category[1]._,
 			title     : title,
@@ -876,7 +886,7 @@ function getEpg() {
 			readStream.pipe(writeStream);
 		} else {
 			// チューナーを選ぶ
-			var tuner = chinachu.getFreeTunerSync(config.tuners, channel.type);
+			var tuner = chinachu.getFreeTunerSync(config.tuners, channel.type, true);
 			
 			// チューナーが見つからない
 			if (tuner === null) {
@@ -913,7 +923,7 @@ function getEpg() {
 			// recpt1用
 			recCmd = recCmd.replace(' --b25', '').replace(' --strip', '').replace('<sid>', 'epg');
 
-			execRecCmd(function() {
+			execRecCmd(function () {
 				// 録画プロセスを生成
 				var recProc = child_process.spawn(recCmd.split(' ')[0], recCmd.replace(/[^ ]+ /, '').split(' '));
 				chinachu.writeTunerPidSync(tuner, recProc.pid);
@@ -934,8 +944,8 @@ function getEpg() {
 				var removeListeners;
 			
 				// プロセスタイムアウト
-				execRecCmd(function() {
-					recProc.kill('SIGKILL');
+				execRecCmd(function () {
+					recProc.kill('SIGTERM');
 				}, 1000 * (config.schedulerEpgRecordTime || 60), '[' + i + '] KILLWAIT');
 			
 				// キャンセル時
@@ -943,7 +953,7 @@ function getEpg() {
 				var onCancel = function () {
 				
 					isCancelled = true;
-					recProc.kill('SIGKILL');
+					recProc.kill('SIGTERM');
 				};
 			
 				removeListeners = function () {
@@ -1013,9 +1023,9 @@ function getEpg() {
 			return;
 		}
 		
-		var onGot = function () {
+		var onGot = function (channelNumber) {
 			setTimeout(function () {
-				r.splice(r.indexOf(ch.n), 1);
+				r.splice(r.indexOf(channelNumber), 1);
 				tick();
 			}, 250);
 		};
@@ -1024,7 +1034,7 @@ function getEpg() {
 		for (i = 0, l = chs.length; i < l; i++) {
 			ch = chs[i];
 			
-			if (!opts.get('ch') && !opts.get('l') && chinachu.getFreeTunerSync(config.tuners, ch.type) === null) {
+			if (!opts.get('ch') && !opts.get('l') && chinachu.getFreeTunerSync(config.tuners, ch.type, true) === null) {
 				continue;
 			}
 			
@@ -1043,7 +1053,7 @@ function getEpg() {
 			
 			c.push(ch.n);
 			r.push(ch.n);
-			get(ch.n, retryCount, onGot);
+			get(ch.n, retryCount, onGot.bind(null, ch.n));
 			
 			if (ch.type === 'GR') {
 				setTimeout(tick, 200);

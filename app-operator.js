@@ -2,7 +2,7 @@
  *  Chinachu Task Operator Service (chinachu-operator)
  *
  *  Copyright (c) 2012 Yuki KAN and Chinachu Project Contributors
- *  http://chinachu.akkar.in/
+ *  https://chinachu.moe/
 **/
 /*jslint node:true, nomen: true, plusplus: true, regexp: true */
 /*global gc */
@@ -88,7 +88,7 @@ var prepTime    = config.operRecPrepTime    || 1000 * 60;//60秒
 var offsetStart = config.operRecOffsetStart || 1000 * 5;
 var offsetEnd   = config.operRecOffsetEnd   || -(1000 * 8);
 
-var clock     = new Date().getTime();
+var clock     = Date.now();
 var next      = 0;
 var scheduler = null;
 var scheduled = 0;
@@ -98,20 +98,20 @@ var operRecCmdSpan  = config.operRecCmdSpan || 0;
 if (operRecCmdSpan < 0) {
 	operRecCmdSpan = 0;
 }
-var recCmdLastTime = new Date().getTime();
+var recCmdLastTime = Date.now();
 function execRecCmd(cmd, timeout, msg) {
 	if (timeout > 0) {
 		setTimeout(execRecCmd, timeout, cmd, 0, msg);
 		return;
 	}
-	var t = operRecCmdSpan - (new Date().getTime() - recCmdLastTime);
+	var t = operRecCmdSpan - (Date.now() - recCmdLastTime);
 	if (t > 0) {
 		util.log(msg + ': ' + t + 'ms');
 		setTimeout(execRecCmd, t, cmd, 0, msg);
 		return;
 	}
 	cmd();
-	recCmdLastTime = new Date().getTime();
+	recCmdLastTime = Date.now();
 }
 
 // 録画中か
@@ -130,7 +130,7 @@ function isRecording(program) {
 function isRecorded(program) {
 	var i, l;
 	for (i = 0, l = recorded.length; i < l; i++) {
-		if (recorded[i].id === program.id) {
+		if (recorded[i].id === program.id && clock < recorded[i].end) {
 			return true;
 		}
 	}
@@ -166,13 +166,18 @@ function stopScheduler() {
 }
 
 // スケジューラーを開始
-function startScheduler() {
+function startScheduler(channel) {
 	if ((scheduler !== null) || (recording.length !== 0)) { return; }
 	
 	var output, finalize;
 	
-	scheduler = child_process.spawn('node', [ 'app-scheduler.js', '-f' ]);
-	util.log('SPAWN: node app-scheduler.js -f (pid=' + scheduler.pid + ')');
+	if (channel) {
+		scheduler = child_process.spawn('node', [ 'app-scheduler.js', '-f', '-ch', channel ]);
+		util.log('SPAWN: node app-scheduler.js -f -ch ' + channel + ' (pid=' + scheduler.pid + ')');
+	} else {
+		scheduler = child_process.spawn('node', [ 'app-scheduler.js', '-f' ]);
+		util.log('SPAWN: node app-scheduler.js -f (pid=' + scheduler.pid + ')');
+	}
 	
 	// ログ用
 	output = fs.createWriteStream('./log/scheduler', { flags: 'a' });
@@ -212,7 +217,7 @@ function doRecord(program) {
 	
 	util.log('RECORD: ' + dateFormat(new Date(program.start), 'isoDateTime') + ' [' + program.channel.name + '] ' + program.title);
 	
-	timeout = program.end - new Date().getTime() + offsetEnd;
+	timeout = program.end - Date.now() + offsetEnd;
 	
 	if (timeout < 0) {
 		util.log('FATAL: 時間超過による録画中止');
@@ -259,12 +264,11 @@ function doRecord(program) {
 	
 	// 録画コマンド
 	recCmd = tuner.command;
-	// recCmd = recCmd.replace(' --strip', '');// EPGのSIDが消えてしまうバグへの対策(要調査)
-	recCmd = recCmd.replace('<sid>', program.channel.sid + ',epg');
+	recCmd = recCmd.replace('<sid>', program.channel.sid);
 	recCmd = recCmd.replace('<channel>', program.channel.channel);
 	program.command = recCmd;
 	
-	execRecCmd(function() {
+	execRecCmd(function () {
 		// 録画プロセスを生成
 		recProc = child_process.spawn(recCmd.split(' ')[0], recCmd.replace(/[^ ]+ /, '').split(' '));
 		chinachu.writeTunerPid(tuner, recProc.pid);
@@ -286,30 +290,6 @@ function doRecord(program) {
 		recProc.stderr.on('data', function (data) {
 			util.log('#' + (recCmd.split(' ')[0] + ': ' + data).replace(/\n/g, ' ').trim());
 		});
-		
-		// EPG処理
-		/* 廃止: EPGパーサーに再実装予定
-		epgInterval = setInterval(function () {
-			var epgProc, output;
-			
-			epgProc = child_process.spawn('node', [
-				'app-scheduler.js', '-f', '-ch', program.channel.channel, '-l', recPath
-			]);
-			util.log('SPAWN: node app-scheduler.js -f -ch ' + program.channel.channel + ' -l ' + recPath + ' (pid=' + epgProc.pid + ')');
-			
-			// ログ用
-			output = fs.createWriteStream('./log/scheduler', { flags: 'a' });
-			util.log('STREAM: ./log/scheduler');
-			
-			epgProc.stdout.on('data', function (data) {
-				output.write(data);
-			});
-			
-			epgProc.on('exit', function () {
-				output.end();
-			});
-		}, 1000 * 300);//300秒
-		*/
 		
 		// お片付け
 		finalize = function () {
@@ -336,6 +316,12 @@ function doRecord(program) {
 			
 			// 状態を更新
 			delete program.pid;
+			for (i = 0, l = recorded.length; i < l; i++) {
+				if (recorded[i].id === program.id) {
+					recorded[i].id = recorded[i].id.replace(/^([^\-]+)\-(.+)$/, '$1-_$2');
+					break;
+				}
+			}
 			recorded.push(program);
 			recording.splice(recording.indexOf(program), 1);
 			fs.writeFileSync(RECORDED_DATA_FILE, JSON.stringify(recorded));
@@ -431,6 +417,12 @@ function reservesChecker(program, i) {
 		if (isRecording(program) === false && isRecorded(program) === false) {
 			prepRecord(program);
 		}
+	} else if (scheduler === null && program.start - clock < prepTime + ((schedulerEpgRecordTime + 30) * 1000)) {
+		if (program.start - clock > prepTime + (schedulerEpgRecordTime * 1000)) {
+			// 録画前EPG確認
+			util.log('CHECK: ' + dateFormat(new Date(program.start), 'isoDateTime') + ' [' + program.channel.name + '] ' + program.title);
+			startScheduler(program.channel.channel);
+		}
 	}
 	
 	// 次の開始時間
@@ -450,7 +442,7 @@ function recordingChecker(program, i) {
 	// 録画開始していない時はreturn
 	if (!program.pid) { return; }
 	
-	execRecCmd(function() {
+	execRecCmd(function () {
 		if (program.isSigTerm || ((typeof program.pid) === 'undefined')) {	// WAITが入った際に多重にSIGTERM発行されないようにする
 			return;
 		}
@@ -500,7 +492,7 @@ chinachu.jsonWatcher(
 // main
 function main() {
 	try {
-		clock = new Date().getTime();
+		clock = Date.now();
 
 		if (reserves.length !== 0) {
 			reserves.forEach(reservesChecker);

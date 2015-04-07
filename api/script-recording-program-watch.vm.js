@@ -12,42 +12,11 @@
 	
 	if (!fs.existsSync(program.recorded)) return response.error(410);
 	
+	if (request.query.debug) {
+		util.log(JSON.stringify(request.headers, null, '  '));
+	}
+	
 	switch (request.type) {
-		// HTTP Live Streaming (Experimental)
-		case 'txt'://for debug
-		case 'm3u8':
-			response.head(200);
-			
-			var current  = (program.end - program.start) / 1000;
-			
-			var d = {
-				t    : request.query.t      || '5',//duration(seconds)
-				s    : request.query.s      || '1024x576',//size(WxH)
-				'c:v': request.query['c:v'] || 'libx264',//vcodec
-				'c:a': request.query['c:a'] || 'libfdk_aac',//acodec
-				'b:v': request.query['b:v'] || '1M',//bitrate
-				'b:a': request.query['b:a'] || '96k'//ab
-			};
-			
-			d.t = parseInt(d.t, 10);
-			
-			response.write('#EXTM3U\n');
-			response.write('#EXT-X-TARGETDURATION:' + d.t + '\n');
-			response.write('#EXT-X-MEDIA-SEQUENCE:' + Math.floor(current / d.t) + '\n');
-			
-			var target = request.query.prefix || '';
-			target += 'watch.m2ts?nore=1&t=' + d.t + '&c:v=' + d['c:v'] + '&c:a=' + d['c:a'];
-			target += '&b:v=' + d['b:v'] + '&s=' + d.s + '&b:a=' + d['b:a'];
-			
-			for (var i = 0; i < current; i += d.t) {
-				if (current - i > 60) { continue; }
-				response.write('#EXTINF:' + d.t + ',\n');
-				response.write(target + '&ss=' + i + '\n');
-			}
-			
-			response.end();
-			return;
-		
 		case 'xspf':
 			response.setHeader('content-disposition', 'attachment; filename="' + program.id + '.xspf"');
 			response.head(200);
@@ -69,10 +38,8 @@
 			return;
 		
 		case 'm2ts':
-		case 'f4v':
-		case 'flv':
 		case 'webm':
-		case 'asf':
+		case 'mp4':
 			response.head(200);
 			
 			util.log('[streamer] streaming: ' + program.recorded);
@@ -94,25 +61,15 @@
 				case 'm2ts':
 					d.f      = 'mpegts';
 					break;
+				case 'mp4':
+					d.f      = 'mp4';
+					d['c:v'] = d['c:v'] || 'libx264';
+					d['c:a'] = d['c:a'] || 'libfdk_aac';
+					break;
 				case 'webm':
 					d.f      = 'webm';
 					d['c:v'] = d['c:v'] || 'libvpx';
 					d['c:a'] = d['c:a'] || 'libvorbis';
-					break;
-				case 'flv':
-					d.f      = 'flv';
-					d['c:v'] = d['c:v'] || 'flv';
-					d['c:a'] = d['c:a'] || 'libfdk_aac';
-					break;
-				case 'f4v':
-					d.f      = 'flv';
-					d['c:v'] = d['c:v'] || 'libx264';
-					d['c:a'] = d['c:a'] || 'libfdk_aac';
-					break;
-				case 'asf':
-					d.f      = 'asf';
-					d['c:v'] = d['c:v'] || 'wmv2';
-					d['c:a'] = d['c:a'] || 'wmav2';//or libfdk_aac ?
 					break;
 			}
 			
@@ -136,12 +93,26 @@
 			if (d.r)  args.push('-r', d.r);
 			if (d.ar) args.push('-ar', d.ar);
 			
+			if (!d.s || d.s === '1920x1080') {
+				args.push('-filter:v', 'yadif');
+			}
+			
 			if (d['b:v']) args.push('-b:v', d['b:v']);
 			if (d['b:a']) args.push('-b:a', d['b:a']);
 			
-			//if (format === 'flv')     { args.push('-vsync', '2'); }
-			if (d['c:v'] === 'libx264') args.push('-preset', 'ultrafast');
-			if (d['c:v'] === 'libvpx')  args.push('-deadline', 'realtime');
+			if (d['c:v'] === 'libx264') {
+				args.push('-vsync', '1');
+				args.push('-profile:v', 'baseline');
+				args.push('-level', '31');
+				args.push('-preset', 'ultrafast');
+			}
+			if (d['c:v'] === 'libvpx') {
+				args.push('-deadline', 'realtime');
+			}
+			
+			if (d.f === 'mp4') {
+				args.push('-movflags', 'frag_keyframe+empty_moov+faststart');
+			}
 			
 			args.push('-y', '-f', d.f, 'pipe:1');
 			
@@ -164,35 +135,35 @@
 					}
 				});
 			} else {
-				var avconv = child_process.spawn('avconv', args);
-				children.push(avconv);// 安全対策
+				var ffmpeg = child_process.spawn('ffmpeg', args);
+				children.push(ffmpeg);// 安全対策
 				
 				if (!d.ss) {
 					var tailf = child_process.spawn('tail', ['-f', program.recorded]);
 					children.push(tailf);// 安全対策
 					
-					tailf.stdout.pipe(avconv.stdin);
+					tailf.stdout.pipe(ffmpeg.stdin);
 					
 					tailf.on('exit', function(code) {
-						if (avconv) avconv.kill('SIGKILL');
+						if (ffmpeg) ffmpeg.kill('SIGKILL');
 						tailf = null;
 					});
 				}
 				
-				avconv.stdout.pipe(response);
+				ffmpeg.stdout.pipe(response);
 				
-				avconv.stderr.on('data', function(d) {
+				ffmpeg.stderr.on('data', function(d) {
 					util.log(d);
 				});
 				
-				avconv.on('exit', function(code) {
+				ffmpeg.on('exit', function(code) {
 					if (tailf) {
 						tailf.stdout.removeAllListeners('data');
 						tailf.stderr.removeAllListeners('data');
 						tailf.kill('SIGKILL');
 						tailf = null;
 					} else {
-						avconv = null;
+						ffmpeg = null;
 					}
 					
 					setTimeout(function() { response.end(); }, 1000);
@@ -204,10 +175,10 @@
 						tailf.stderr.removeAllListeners('data');
 						tailf.kill('SIGKILL');
 					} else {
-						avconv.stdout.removeAllListeners('data');
-						avconv.stderr.removeAllListeners('data');
-						avconv.kill('SIGKILL');
-						avconv = null;
+						ffmpeg.stdout.removeAllListeners('data');
+						ffmpeg.stderr.removeAllListeners('data');
+						ffmpeg.kill('SIGKILL');
+						ffmpeg = null;
 					}
 				});
 			}

@@ -5,7 +5,6 @@
  *  https://chinachu.moe/
 **/
 /*jslint node:true, nomen: true, plusplus: true, regexp: true */
-/*global gc */
 'use strict';
 
 var CONFIG_FILE         = __dirname + '/config.json';
@@ -252,7 +251,7 @@ function doRecord(program) {
 	program.tuner = tuner;
 	
 	// 保存先パス
-	recPath = config.recordedDir + chinachu.formatRecordedName(program, config.recordedFormat);
+	recPath = config.recordedDir + chinachu.formatRecordedName(program, program.recordedFormat || config.recordedFormat);
 	program.recorded = recPath;
 	
 	// 保存先ディレクトリ
@@ -502,19 +501,26 @@ function main() {
 
 		recording.forEach(recordingChecker);
 
-		if ((scheduler === null) && (clock - scheduled > schedulerIntervalTime) && ((next === 0) || (next - clock > schedulerProcessTime)) && ((schedulerSleepStartHour > new Date().getHours()) || (schedulerSleepEndHour <= new Date().getHours()))) {
-			startScheduler();
-			scheduled = clock;
+		if ((scheduler === null) && (clock - scheduled > schedulerIntervalTime) && ((next === 0) || (next - clock > schedulerProcessTime))) {
+			if (
+				(
+					schedulerSleepStartHour < schedulerSleepEndHour && (
+						schedulerSleepStartHour > new Date().getHours() ||
+						schedulerSleepEndHour <= new Date().getHours()
+					)
+				) || (
+					schedulerSleepStartHour > schedulerSleepEndHour && (
+						schedulerSleepStartHour > new Date().getHours() &&
+						schedulerSleepEndHour <= new Date().getHours()
+					)
+				)
+			) {
+				startScheduler();
+				scheduled = clock;
+			}
 		}
 	} catch (e) {
 		util.error('ERROR: ' + e.stack);
 	}
 }
 setInterval(main, 1000);
-
-//
-// gc
-//
-if (typeof gc !== 'undefined') {
-	setInterval(gc, 1000 * 60 * 2);
-}

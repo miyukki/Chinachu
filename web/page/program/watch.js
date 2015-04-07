@@ -129,6 +129,12 @@ P = Class.create(P, {
 			this.view.title.update(titleHtml);
 		}.bind(this), 0);
 		
+		var saveSettings = function (d) {
+			localStorage.setItem('program.watch.settings', JSON.stringify(d));
+		};
+		
+		var set = JSON.parse(localStorage.getItem('program.watch.settings') || '{}');
+		
 		var modal = this.modal = new flagrate.Modal({
 			disableCloseByMask: true,
 			disableCloseButton: true,
@@ -142,6 +148,8 @@ P = Class.create(P, {
 						if (this.form.validate() === false) { return; }
 						
 						var d = this.d = this.form.result();
+						
+						saveSettings(d);
 						
 						if ((d.ext === 'm2ts') && (!window.navigator.plugins['VLC Web Plugin'])) {
 							new flagrate.Modal({
@@ -164,6 +172,8 @@ P = Class.create(P, {
 						
 						var d = this.form.result();
 						
+						saveSettings(d);
+						
 						if (program._isRecording) {
 							d.prefix = window.location.protocol + '//' + window.location.host + '/api/recording/' + program.id + '/';
 							window.open('./api/recording/' + program.id + '/watch.xspf?' + Object.toQueryString(d));
@@ -180,6 +190,28 @@ P = Class.create(P, {
 			modal.buttons[1].disable();
 		}
 		
+		var exts = [];
+		
+		exts.push({
+			label     : 'M2TS',
+			value     : 'm2ts',
+			isSelected: set.ext === 'm2ts'
+		});
+
+		if (/Trident/.test(navigator.userAgent) === true) {
+			exts.push({
+				label     : 'MP4',
+				value     : 'mp4',
+				isSelected: set.ext === 'mp4'
+			});
+		} else {
+			exts.push({
+				label     : 'WebM',
+				value     : 'webm',
+				isSelected: set.ext === 'webm'
+			});
+		}
+		
 		this.form = new Hyperform({
 			formWidth  : '100%',
 			labelWidth : '100px',
@@ -191,7 +223,7 @@ P = Class.create(P, {
 					input: {
 						type      : 'radio',
 						isRequired: true,
-						items     : []
+						items     : exts
 					}
 				},
 				{
@@ -204,15 +236,17 @@ P = Class.create(P, {
 							{
 								label     : '無変換',
 								value     : 'copy',
-								isSelected: true
+								isSelected: set['c:v'] === 'copy'
 							},
 							{
 								label     : 'H.264',
-								value     : 'libx264'
+								value     : 'libx264',
+								isSelected: set['c:v'] === 'libx264'
 							},
 							{
 								label     : 'MPEG-2',
-								value     : 'mpeg2video'
+								value     : 'mpeg2video',
+								isSelected: set['c:v'] === 'mpeg2video'
 							}
 						]
 					},
@@ -284,15 +318,17 @@ P = Class.create(P, {
 							{
 								label     : '無変換',
 								value     : 'copy',
-								isSelected: true
+								isSelected: set['c:a'] === 'copy'
 							},
 							{
 								label     : 'AAC',
-								value     : 'libfdk_aac'
+								value     : 'libfdk_aac',
+								isSelected: set['c:a'] === 'libfdk_aac'
 							},
 							{
 								label     : 'Vorbis',
-								value     : 'libvorbis'
+								value     : 'libvorbis',
+								isSelected: set['c:a'] === 'libvorbis'
 							}
 						]
 					},
@@ -362,33 +398,24 @@ P = Class.create(P, {
 						isRequired: true,
 						items     : [
 							{
-								label     : '320x180 (16:9)',
-								value     : '320x180'
-							},
-							{
-								label     : '640x360 (HVGAW/16:9)',
-								value     : '640x360'
-							},/*
-							{
-								label     : '640x480 (VGA/4:3)',
-								value     : '640x480'
-							},*/
-							{
 								label     : '960x540 (qHD/16:9)',
-								value     : '960x540'
+								value     : '960x540',
+								isSelected: set['s'] === '960x540'
 							},
 							{
 								label     : '1024x576 (WSVGA/16:9)',
-								value     : '1024x576'
+								value     : '1024x576',
+								isSelected: set['s'] === '1024x576'
 							},
 							{
 								label     : '1280x720 (HD/16:9)',
 								value     : '1280x720',
-								isSelected: true
+								isSelected: set['s'] === '1280x720'
 							},
 							{
 								label     : '1920x1080 (FHD/16:9)',
-								value     : '1920x1080'
+								value     : '1920x1080',
+								isSelected: set['s'] === '1920x1080'
 							}
 						]
 					},
@@ -405,24 +432,28 @@ P = Class.create(P, {
 						items     : [
 							{
 								label     : '256kbps',
-								value     : '256k'
+								value     : '256k',
+								isSelected: set['b:v'] === '256k'
 							},
 							{
 								label     : '512kbps',
-								value     : '512k'
+								value     : '512k',
+								isSelected: set['b:v'] === '512k'
 							},
 							{
 								label     : '1Mbps',
 								value     : '1M',
-								isSelected: true
+								isSelected: set['b:v'] === '1M'
 							},
 							{
 								label     : '2Mbps',
-								value     : '2M'
+								value     : '2M',
+								isSelected: set['b:v'] === '2M'
 							},
 							{
 								label     : '3Mbps',
-								value     : '3M'
+								value     : '3M',
+								isSelected: set['b:v'] === '3M'
 							}
 						]
 					},
@@ -439,24 +470,28 @@ P = Class.create(P, {
 						items     : [
 							{
 								label     : '32kbps',
-								value     : '32k'
+								value     : '32k',
+								isSelected: set['b:a'] === '32k'
 							},
 							{
 								label     : '64kbps',
-								value     : '64k'
+								value     : '64k',
+								isSelected: set['b:a'] === '64k'
 							},
 							{
 								label     : '96kbps',
 								value     : '96k',
-								isSelected: true
+								isSelected: set['b:a'] === '96k'
 							},
 							{
 								label     : '128kbps',
-								value     : '128k'
+								value     : '128k',
+								isSelected: set['b:a'] === '128k'
 							},
 							{
 								label     : '192kbps',
-								value     : '192k'
+								value     : '192k',
+								isSelected: set['b:a'] === '192k'
 							}
 						]
 					},
@@ -466,32 +501,6 @@ P = Class.create(P, {
 				}
 			]
 		});
-		
-		if (Prototype.Browser.MobileSafari) {
-			this.form.fields[0].input.items.push({
-				label     : 'HLS (MPEG-2 TS)',
-				value     : 'm3u8',
-				isSelected: true
-			});
-		}
-		
-		if (!Prototype.Browser.MobileSafari) {
-			this.form.fields[0].input.items.push({
-				label     : 'M2TS',
-				value     : 'm2ts'
-			});
-			
-			this.form.fields[0].input.items.push({
-				label     : 'WebM',
-				value     : 'webm',
-				isSelected: true
-			});
-			
-			/* this.form.fields[0].input.items.push({
-				label     : 'FLV',
-				value     : 'flv'
-			}); */
-		}
 		
 		this.form.render(modal.content);
 		
@@ -522,7 +531,7 @@ P = Class.create(P, {
 			
 			if (p._isRecording) return;
 			
-			if (d.ext === 'webm' || d.ext === 'm3u8') {
+			if (d.ext === 'webm' || d.ext === 'mp4') {
 				if (video.paused) {
 					video.play();
 					control.getElementByKey('play').setLabel('Pause');
@@ -533,10 +542,10 @@ P = Class.create(P, {
 			} else {
 				if (vlc.playlist.isPlaying) {
 					vlc.playlist.pause();
-					control.getElementByKey('play').setLabel('Pause');
+					control.getElementByKey('play').setLabel('Play');
 				} else {
 					vlc.playlist.play();
-					control.getElementByKey('play').setLabel('Play');
+					control.getElementByKey('play').setLabel('Pause');
 				}
 			}
 		};
@@ -547,16 +556,22 @@ P = Class.create(P, {
 			'class': 'video-container'
 		}).insertTo(this.view.content);
 		
-		if (d.ext === 'webm' || d.ext === 'm3u8') {
+		if (d.ext === 'webm' || d.ext === 'mp4') {
 			var video = new flagrate.Element('video', {
-				src     : getRequestURI(),
-				autoplay: true
+				autoplay: true,
+				controls: true
 			}).insertTo(videoContainer);
+			
+			new flagrate.Element('source', {
+				src     : getRequestURI(),
+				type    : 'video/' + d.ext
+			}).insertTo(video);
 			
 			video.addEventListener('click', togglePlay);
 			
-			//video.load();
 			video.volume = 1;
+			
+			video.play();
 		} else {
 			var vlc = flagrate.createElement('embed', {
 				type: 'application/x-vlc-plugin',
@@ -584,7 +599,7 @@ P = Class.create(P, {
 			items: [
 				{
 					key    : 'play',
-					element: new flagrate.Button({ label: 'Play / Pause', onSelect: togglePlay})
+					element: new flagrate.Button({ label: 'Pause', onSelect: togglePlay})
 				},
 				'--',
 				{
@@ -630,8 +645,9 @@ P = Class.create(P, {
 			fastForward.disable();
 			fastRewind.disable();
 			
-			if (d.ext === 'webm') {
+			if (d.ext === 'webm' || d.ext === 'mp4') {
 				video.src = uri;
+				video.play();
 			} else {
 				vlc.playlist.playItem(vlc.playlist.add(uri));
 			}
@@ -672,7 +688,7 @@ P = Class.create(P, {
 			
 			var vol = control.getElementByKey('vol');
 			
-			if (d.ext === 'webm' || d.ext === 'm3u8') {
+			if (d.ext === 'webm' || d.ext === 'mp4') {
 				video.volume = vol.getValue() / 10;
 			} else {
 				vlc.audio.volume = vol.getValue() * 10;
@@ -687,7 +703,7 @@ P = Class.create(P, {
 			
 			var current = 0;
 			
-			if (d.ext === 'webm' || d.ext === 'm3u8') {
+			if (d.ext === 'webm' || d.ext === 'mp4') {
 				current = video.currentTime;
 			} else {
 				if (vlc.playlist.isPlaying) {

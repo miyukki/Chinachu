@@ -5,7 +5,6 @@
  *  https://chinachu.moe/
 **/
 /*jslint node:true, nomen:true, plusplus:true, regexp:true, vars:true, continue:true, bitwise:true */
-/*global gc */
 'use strict';
 
 var CONFIG_FILE         = __dirname + '/config.json';
@@ -359,7 +358,6 @@ function httpServerMain(req, res, query) {
 		if (ext === 'flv') { type = 'video/x-flv'; }
 		if (ext === 'webm') { type = 'video/webm'; }
 		if (ext === 'm2ts') { type = 'video/MP2T'; }
-		if (ext === 'm3u8') { type = 'application/x-mpegURL'; }
 		if (ext === 'asf') { type = 'video/x-ms-asf'; }
 		if (ext === 'json') { type = 'application/json; charset=utf-8'; }
 		if (ext === 'xspf') { type = 'application/xspf+xml'; }
@@ -609,13 +607,6 @@ function httpServerMain(req, res, query) {
 					});
 					sandbox = null;
 				}, 3000);
-				
-				if (typeof gc !== 'undefined') {
-					if (timer.gcByApi) { clearTimeout(timer.gcByApi); }
-					timer.gcByApi = setTimeout(function () {
-						process.nextTick(gc);
-					}, 3500);
-				}
 				
 				req.connection.removeListener('close', onEnd);
 				req.connection.removeListener('error', onError);
@@ -937,10 +928,3 @@ function processChecker() {
 	}
 }
 processChecker();
-
-//
-// gc
-//
-if (typeof gc !== 'undefined') {
-	setInterval(gc, 1000 * 60 * 2);
-}

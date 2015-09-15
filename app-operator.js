@@ -20,7 +20,7 @@ var child_process = require('child_process');
 
 // ディレクトリチェック
 if (!fs.existsSync('./data/') || !fs.existsSync('./log/') || !fs.existsSync('./web/')) {
-	util.error('必要なディレクトリが存在しないか、カレントワーキングディレクトリが不正です。');
+	console.error('必要なディレクトリが存在しないか、カレントワーキングディレクトリが不正です。');
 	process.exit(1);
 }
 
@@ -33,7 +33,7 @@ process.on('SIGQUIT', function () {
 
 // 例外処理
 process.on('uncaughtException', function (err) {
-	util.error('uncaughtException: ' + err.stack);
+	console.error('uncaughtException: ' + err.stack);
 });
 
 // 追加モジュールのロード
@@ -84,8 +84,8 @@ var schedulerSleepStartHour = config.operSchedulerSleepStartHour || 1;
 var schedulerSleepEndHour   = config.operSchedulerSleepEndHour   || 5;
 var schedulerEpgRecordTime  = config.schedulerEpgRecordTime      || 60;
 var prepTime    = config.operRecPrepTime    || 1000 * 60;//60秒
-var offsetStart = config.operRecOffsetStart || 1000 * 5;
-var offsetEnd   = config.operRecOffsetEnd   || -(1000 * 8);
+var offsetStart = (typeof config.operRecOffsetStart !== 'undefined' ? config.operRecOffsetStart : 1000 * 5);
+var offsetEnd   = (typeof config.operRecOffsetEnd !== 'undefined' ? config.operRecOffsetEnd : -(1000 * 8));
 
 var clock     = Date.now();
 var next      = 0;
@@ -263,8 +263,13 @@ function doRecord(program) {
 	
 	// 録画コマンド
 	recCmd = tuner.command;
-	recCmd = recCmd.replace('<sid>', program.channel.sid);
 	recCmd = recCmd.replace('<channel>', program.channel.channel);
+	if (program['1seg'] === true) {
+		recCmd = recCmd.replace(' --b25', '');
+		recCmd = recCmd.replace('<sid>', '1seg');
+	} else {
+		recCmd = recCmd.replace('<sid>', program.channel.sid);
+	}
 	program.command = recCmd;
 	
 	execRecCmd(function () {
@@ -456,7 +461,7 @@ chinachu.jsonWatcher(
 	RESERVES_DATA_FILE,
 	function _onUpdated(err, data, mes) {
 		if (err) {
-			util.error(err);
+			console.error(err);
 			return;
 		}
 		
@@ -478,7 +483,7 @@ chinachu.jsonWatcher(
 	RECORDED_DATA_FILE,
 	function _onUpdated(err, data, mes) {
 		if (err) {
-			util.error(err);
+			console.error(err);
 			return;
 		}
 		
@@ -520,7 +525,7 @@ function main() {
 			}
 		}
 	} catch (e) {
-		util.error('ERROR: ' + e.stack);
+		console.error('ERROR: ' + e.stack);
 	}
 }
 setInterval(main, 1000);

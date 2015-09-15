@@ -33,15 +33,16 @@ var zlib          = require('zlib');
 var events        = require('events');
 var dns           = require('dns');
 var http          = require('http');
-var spdy          = require('spdy');
+var https         = require('https');
 var auth          = require('http-auth');
 var socketio      = require('socket.io');
 var chinachu      = require('chinachu-common');
 var S             = require('string');
+var geoip         = require('geoip-lite');
 
 // Directory Checking
 if (!fs.existsSync('./data/') || !fs.existsSync('./log/') || !fs.existsSync('./web/')) {
-	util.error('FATAL: Current working directory is invalid.');
+	console.error('FATAL: Current working directory is invalid.');
 	process.exit(1);
 }
 
@@ -60,7 +61,7 @@ process.on('uncaughtException', function (err) {
 		return;
 	}
 	
-	util.error('uncaughtException: ' + err);
+	console.error('uncaughtException: ' + err);
 });
 
 // etc.
@@ -110,9 +111,10 @@ if (tlsEnabled) {
 var basic = null;
 var basicAuthEnabled = config.wuiUsers && (config.wuiUsers.length > 0);
 if (basicAuthEnabled) {
-	basic = auth({
-		authRealm: 'Authentication.',
-		authList : config.wuiUsers
+	basic = auth.basic({
+		realm: 'Authentication.'
+	}, function (username, password, callback) {
+		callback(config.wuiUsers.indexOf([username, password].join(':')) !== -1);
 	});
 }
 
@@ -129,11 +131,19 @@ var recorded  = [];
 var server, openServer, httpOpenServer, httpServer, httpServerMain;
 
 if (tlsEnabled) {
-	server = spdy.createServer(tlsOption, httpServer);
+	if (basicAuthEnabled) {
+		server = https.createServer(basic, tlsOption, httpServer);
+	} else {
+		server = https.createServer(tlsOption, httpServer);
+	}
 } else {
-	server = http.createServer(httpServer);
+	if (basicAuthEnabled) {
+		server = http.createServer(basic, httpServer);
+	} else {
+		server = http.createServer(httpServer);
+	}
 	
-	util.error('**SELF-REGULATION WARNING**: If you want to access from outside of LAN, Please activate TLS.');
+	console.error('**SELF-REGULATION WARNING**: If you want to access from outside of LAN, Please activate TLS.');
 }
 server.timeout = 240000;
 server.listen(config.wuiPort || 10772, config.wuiHost || '::', function () {
@@ -142,20 +152,13 @@ server.listen(config.wuiPort || 10772, config.wuiHost || '::', function () {
 
 // EXPERIMENTAL: Open Server for Access from LAN.
 if (openServerEnabled) {
-	openServer = http.createServer(httpOpenServer);
+	openServer = http.createServer(httpServer);
 	openServer.timeout = 0;
 	dns.lookup(os.hostname(), function (err, hostIp) {
 		openServer.listen(config.wuiOpenPort || 20772, config.wuiOpenHost || hostIp, function () {
 			util.log('HTTP Open Server Listening on ' + util.inspect(openServer.address()));
 		});
 	});
-}
-
-// HTTP Open Server Wrapper
-function httpOpenServer(req, res) {
-	
-	req.isOpen = true;
-	httpServer(req, res);
 }
 
 // HTTP Server
@@ -218,15 +221,36 @@ function httpServer(req, res) {
 }
 
 function httpServerMain(req, res, query) {
+	var remoteAddress = req.client.remoteAddress;
+    
+	if (config.wuiXFF === true && req.headers['x-forwarded-for']) {
+		remoteAddress = req.headers['x-forwarded-for'].split(',')[0];
+	}
+	
+	if (/^\:\:ffff\:[^\:]+/.test(remoteAddress) === true) {
+		remoteAddress = remoteAddress.split(':')[3];
+	}
+    
 	// http request logging
 	var log = function (statusCode) {
 		util.log([
 			statusCode,
 			req.method + ':' + req.url,
-			req.headers['x-forwarded-for'] || req.client.remoteAddress,
-			(req.headers['user-agent'] || '').split(' ').pop() || '-'
+			remoteAddress,
+			'"' + (req.headers['user-agent'] || '-') + '"'
 		].join(' '));
 	};
+	
+	// country restriction
+	if (Array.isArray(config.wuiAllowCountries) && config.wuiAllowCountries.length > 0) {
+		var geo = geoip.lookup(remoteAddress);
+		if (geo !== null && config.wuiAllowCountries.indexOf(geo.country) === -1) {
+			res.writeHead(403, {'content-type': 'text/plain'});
+			res.end('403 Forbidden\n');
+			log(403);
+			console.warn('Non-allowed Country IP Blocked', remoteAddress, JSON.stringify(geo));
+		}
+	}
 	
 	// serve static file
 	var location = req.url;
@@ -245,7 +269,7 @@ function httpServerMain(req, res, query) {
 	}
 	
 	var filename = path.join('./web/', location);
-	
+
 	var ext = null;
 	if (filename.match(/[^\/]+\..+$/) !== null) {
 		ext = filename.split('.').pop();
@@ -449,7 +473,7 @@ function httpServerMain(req, res, query) {
 			try {
 				r = JSON.parse(json);
 			} catch (e) {
-				util.error(e);
+				console.error(e);
 				return resErr(500);
 			}
 			
@@ -575,7 +599,7 @@ function httpServerMain(req, res, query) {
 				}
 			};
 			
-			var onEnd = function () {
+			var onClose = function () {
 				
 				if (!isClosed) {
 					isClosed = true;
@@ -586,14 +610,12 @@ function httpServerMain(req, res, query) {
 				cleanup();
 			};
 			
-			var onError = function () {
+			var onResponseClose = function () {
 				
 				if (!isClosed) {
 					isClosed = true;
 					
-					req.emit('close');
-					
-					resErr(500);
+					log(res.statusCode);
 				}
 				
 				cleanup();
@@ -602,22 +624,28 @@ function httpServerMain(req, res, query) {
 			cleanup = function () {
 				
 				setTimeout(function () {
-					sandbox.children.forEach(function (child) {
-						child.kill('SIGKILL');
+					
+					sandbox.children.forEach(function (pid) {
+						
+						util.log('child process killing: PID=' + pid);
+						
+						try {
+							process.kill(pid, 'SIGKILL');
+						} catch (e) {
+						}
 					});
+					
 					sandbox = null;
-				}, 3000);
+				}, 1000);
 				
-				req.connection.removeListener('close', onEnd);
-				req.connection.removeListener('error', onError);
-				req.removeListener('end', onEnd);
+				req.removeListener('close', onClose);
+				res.removeListener('close', onResponseClose);
 				
 				cleanup = emptyFunction;
 			};
 			
-			req.connection.on('close', onEnd);
-			req.connection.on('error', onError);
-			res.on('end', onEnd);
+			req.on('close', onClose);
+			res.on('close', onResponseClose);
 			
 			try {
 				vm.runInNewContext(fs.readFileSync(scriptFile), sandbox, scriptFile);
@@ -627,7 +655,7 @@ function httpServerMain(req, res, query) {
 					isClosed = true;
 				}
 				
-				util.error(ee);
+				console.error(ee);
 			}
 			
 			return;
@@ -638,52 +666,12 @@ function httpServerMain(req, res, query) {
 	
 	// 静的ファイルまたはAPIレスポンスの分岐
 	if (req.url.match(/^\/api\/.*$/) === null) {
+		if (/^web\//.test(filename) === false) { return resErr(400); }
 		if (fs.existsSync(filename) === false) { return resErr(404); }
 		
-		if (req.url.match(/^\/apple-.+\.png$/) !== null) {
-			process.nextTick(responseStatic);
-		} else if (!basic || req.isOpen) {
-			process.nextTick(responseStatic);
-		} else {
-			basic.apply(req, res, function () {
-				process.nextTick(responseStatic);
-			});
-		}
+		responseStatic();
 	} else {
-		if (basic && !req.isOpen) {
-			if (!!query._auth) {
-				// Base64文字列を取り出す
-				var auths = query._auth.split(':');
-				
-				// バリデーション
-				if (auths[0] !== 'basic' || auths.length !== 2) {
-					return resErr(400);
-				}
-				
-				var auth = decodeURIComponent(auths[1]);
-				
-				// Base64デコード
-				try {
-					auth = new Buffer(auth, 'base64').toString('ascii');
-				} catch (e) {
-					return resErr(401);
-				}
-				
-				// 認証
-				if (config.wuiUsers && config.wuiUsers.indexOf(auth) === -1) {
-					return resErr(401);
-				}
-				
-				// 通ってよし
-				process.nextTick(responseApi);
-			} else {
-				basic.apply(req, res, function () {
-					process.nextTick(responseApi);
-				});
-			}
-		} else {
-			process.nextTick(responseApi);
-		}
+		responseApi();
 	}
 }
 
@@ -733,7 +721,7 @@ function ioOpenServer(socket) {
 }
 
 function ioServer(socket) {
-	if (basic && !socket.isOpen) {
+	if (basicAuthEnabled && !socket.isOpen) {
 		// ヘッダを確認
 		if (!socket.handshake.headers.authorization || (socket.handshake.headers.authorization.match(/^Basic .+$/) === null)) {
 			socket.disconnect();
@@ -787,7 +775,7 @@ chinachu.jsonWatcher(
 	RULES_FILE,
 	function _onUpdated(err, data, mes) {
 		if (err) {
-			util.error(err);
+			console.error(err);
 			return;
 		}
 		
@@ -803,7 +791,7 @@ chinachu.jsonWatcher(
 	SCHEDULE_DATA_FILE,
 	function _onUpdated(err, data, mes) {
 		if (err) {
-			util.error(err);
+			console.error(err);
 			return;
 		}
 		
@@ -819,7 +807,7 @@ chinachu.jsonWatcher(
 	RESERVES_DATA_FILE,
 	function _onUpdated(err, data, mes) {
 		if (err) {
-			util.error(err);
+			console.error(err);
 			return;
 		}
 		
@@ -835,7 +823,7 @@ chinachu.jsonWatcher(
 	RECORDING_DATA_FILE,
 	function _onUpdated(err, data, mes) {
 		if (err) {
-			util.error(err);
+			console.error(err);
 			return;
 		}
 		
@@ -851,7 +839,7 @@ chinachu.jsonWatcher(
 	RECORDED_DATA_FILE,
 	function _onUpdated(err, data, mes) {
 		if (err) {
-			util.error(err);
+			console.error(err);
 			return;
 		}
 		

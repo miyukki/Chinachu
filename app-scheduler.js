@@ -22,7 +22,7 @@ var child_process = require('child_process');
 
 // ディレクトリチェック
 if (!fs.existsSync('./data/') || !fs.existsSync('./log/') || !fs.existsSync('./web/')) {
-	util.error('必要なディレクトリが存在しないか、カレントワーキングディレクトリが不正です。');
+	console.error('必要なディレクトリが存在しないか、カレントワーキングディレクトリが不正です。');
 	process.exit(1);
 }
 
@@ -207,8 +207,12 @@ function scheduler() {
 	reserves.forEach(function (reserve) {
 		if (reserve.isManualReserved) {
 			if (reserve.start + 86400000 > Date.now()) {
+				var isOneseg = reserve['1seg'] === true;
 				reserve = chinachu.getProgramById(reserve.id, schedule) || reserve;
 				reserve.isManualReserved = true;
+				if (isOneseg === true) {
+					reserve['1seg'] = true;
+				}
 				matches.push(reserve);
 			}
 			return;
@@ -365,7 +369,7 @@ function convertPrograms(p, ch) {
 			.replace(/第([0-9]+|[０１２３４５６７８９零一壱二弐三参四五伍六七八九十拾]+)(話|回)/g, '');
 		
 		if (c.category[1]._ === 'anime') {
-			title = title.replace(/アニメ「([^「」]+)」/g, '$1');
+			title = title.replace(/(?:TV|ＴＶ)?アニメ「([^「」]+)」/g, '$1');
 		}
 		
 		title = title.trim();
@@ -1086,7 +1090,7 @@ function getEpg() {
 // 既に実行中か
 isRunning(function (running) {
 	if (running) {
-		util.error('ERROR: Scheduler is already running.');
+		console.error('ERROR: Scheduler is already running.');
 		process.exit(1);
 	} else {
 		createPidFile();

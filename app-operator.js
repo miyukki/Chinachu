@@ -53,6 +53,12 @@ var config = require(CONFIG_FILE);
 // 録画中リストをクリア
 fs.writeFileSync(RECORDING_DATA_FILE, '[]');
 
+// 保存先ディレクトリが存在しない場合には作成
+if (!fs.existsSync(config.recordedDir)) {
+	util.log('MKDIR: ' + config.recordedDir);
+	mkdirp.sync(config.recordedDir);
+}
+
 // Tweeter (Experimental)
 if (config.operTweeter && config.operTweeterAuth && config.operTweeterFormat) {
 	var tweeter = new Mtwitter({
@@ -349,6 +355,21 @@ function doRecord(program) {
 				util.log('SPAWN: ' + config.recordedCommand + ' (pid=' + postProcess.pid + ')');
 			}
 			
+                	// Tweeter (Experimental)
+                	if (tweeter && config.operTweeterFormat.end) {
+                	        tweeterUpdater(
+                	                config.operTweeterFormat.end
+						.replace('<id>', program.id)
+						.replace('<type>', program.channel.type)
+						.replace('<channel>', ((program.channel.type === 'CS') ? program.channel.sid : program.channel.channel))
+						.replace('<title>',   program.title)
+						.replace('<channelname>', program.channel.name)
+						.replace('<date>', dateFormat(new Date(program.start), "mm/dd"))
+						.replace('<starttime>', dateFormat(new Date(program.start), "h:MM"))
+						.replace('<endtime>', dateFormat(new Date(program.end), "h:MM"))
+                        	);
+                	}
+			
 			finalize = null;
 		};
 		// 録画プロセス終了時処理
@@ -367,6 +388,10 @@ function doRecord(program) {
 					.replace('<type>', program.channel.type)
 					.replace('<channel>', ((program.channel.type === 'CS') ? program.channel.sid : program.channel.channel))
 					.replace('<title>',   program.title)
+					.replace('<channelname>', program.channel.name)
+					.replace('<date>', dateFormat(new Date(program.start), "mm/dd"))
+					.replace('<starttime>', dateFormat(new Date(program.start), "h:MM"))
+					.replace('<endtime>', dateFormat(new Date(program.end), "h:MM"))
 			);
 		}
 	}, 0, 'RECWAIT: ' + tuner.name);
@@ -401,14 +426,18 @@ function prepRecord(program) {
 				.replace('<type>', program.channel.type)
 				.replace('<channel>', ((program.channel.type === 'CS') ? program.channel.sid : program.channel.channel))
 				.replace('<title>',   program.title)
+				.replace('<channelname>', program.channel.name)
+				.replace('<date>', dateFormat(new Date(program.start), "mm/dd"))
+				.replace('<starttime>', dateFormat(new Date(program.start), "h:MM"))
+				.replace('<endtime>', dateFormat(new Date(program.end), "h:MM"))
 		);
 	}
 }
 
 // 予約時間チェック
 function reservesChecker(program, i) {
-	// スキップ
-	if (program.isSkip) { return undefined; }
+	// スキップ または 競合
+	if (program.isSkip || program.isConflict) { return undefined; }
 	
 	// 予約時間超過
 	if (clock > program.end) {
